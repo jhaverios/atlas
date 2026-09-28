@@ -59,6 +59,23 @@ def is_trading_day(engine: Engine, d: date) -> bool:
         return bool(conn.execute(sql, {"idx": _NSE_CAL_INDEX, "d": d}).scalar())
 
 
+def sessions_after(engine: Engine, after: date, through: date) -> list[date]:
+    """NSE sessions strictly after *after*, up to and including *through*, oldest first."""
+    sql = text(
+        "SELECT date FROM atlas_foundation.index_prices "
+        "WHERE index_code = :idx AND date > :a AND date <= :b ORDER BY date"
+    )
+    with open_compute_session(engine) as conn:
+        return [r[0] for r in conn.execute(sql, {"idx": _NSE_CAL_INDEX, "a": after, "b": through})]
+
+
+def last_scored_date(engine: Engine) -> date | None:
+    """Newest date the lens journal holds, or None when it is empty."""
+    sql = text("SELECT max(date) FROM atlas_foundation.atlas_lens_scores_daily")
+    with open_compute_session(engine) as conn:
+        return conn.execute(sql).scalar()
+
+
 # Financial reporting availability lags (FM-proposed, DECISIONS D-LoopC): a quarter
 # / annual filing is treated as KNOWABLE only `lag` days after its period_end (the
 # only honest as-of proxy without a filing-date column). Conservative so the journal

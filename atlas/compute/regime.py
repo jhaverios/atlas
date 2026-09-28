@@ -669,11 +669,36 @@ def backfill_regime(
     return int(str(result["rows_written"]))
 
 
+DAILY_WINDOW_DAYS = 10
+CATCHUP_LIMIT_DAYS = 120  # a nightly catch-up, not a backfill: past this, run backfill_regime
+
+
+def daily_window_start(today: date, last_written: date | None) -> date:
+    """First date the nightly run rewrites.
+
+    Normally the last ten calendar days. When the table has fallen further behind than
+    that, a fixed window leaves everything before it as a permanent hole: after the
+    2026-09 Kite outage, 9-17 Sept would never have been written. So the window reaches
+    back to the day after the newest row, bounded by CATCHUP_LIMIT_DAYS.
+    """
+    start = today - timedelta(days=DAILY_WINDOW_DAYS)
+    if last_written is not None:
+        start = min(start, last_written + timedelta(days=1))
+    return max(start, today - timedelta(days=CATCHUP_LIMIT_DAYS))
+
+
+def _last_written_date(engine: Engine, schema: str) -> date | None:
+    with open_compute_session(engine) as conn:
+        return conn.exec_driver_sql(
+            f"SELECT max(date) FROM {schema}.atlas_market_regime_daily"  # noqa: S608 -- schema is an internal constant
+        ).scalar()
+
+
 def run_daily_regime(engine: Engine | None = None, schema: str = "atlas") -> int:
-    """Incremental run for the most recent ~10 calendar days."""
+    """Incremental run: the last ~10 calendar days, or back to the newest row if older."""
     eng = engine or get_engine()
     today = date.today()
-    window_start = today - timedelta(days=10)
+    window_start = daily_window_start(today, _last_written_date(eng, schema))
     result = _run_pipeline(
         eng, start=window_start, end=today, write_start=window_start, schema=schema
     )
@@ -687,5 +712,6 @@ __all__ = [
     "backfill_regime",
     "classify_regime_state",
     "compute_regime_inputs",
+    "daily_window_start",
     "run_daily_regime",
 ]

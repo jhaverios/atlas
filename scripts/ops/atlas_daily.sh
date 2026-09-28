@@ -24,14 +24,34 @@ echo "=== atlas_daily EOD=$EOD  $(date -Is) ===" | tee -a "$LOG"
 FAILURES=()
 RUNFILE=$(mktemp /tmp/atlas_daily_runs.XXXXXX)   # per-step timings → health snapshot
 trap 'rm -f "$RUNFILE"' EXIT
+# WHY A STEP FAILED travels with its run row (same mechanism as atlas_global_daily.sh). From
+# 9 to 25 Sept 2026 /health said "kite_autologin failed" every night and nothing else; the
+# reason — ModuleNotFoundError: No module named 'pyotp' — sat in a log on the box. So a failed
+# step's last lines are read back out of $LOG from the byte the step started at, flattened
+# (the runfile is a TSV), redacted and capped. THE BOARD IS PUBLIC, and a traceback is where
+# credentials surface (requests prints URLs with api keys, drivers echo DSNs), so the reason
+# is redacted here and again by write_health_snapshot.py before it reaches the database.
+redact_secrets() {  # stdin → stdout; anything shaped like a credential becomes ***
+  sed -E \
+    -e "s#://([^:/@[:space:]]+):[^@[:space:]]*@#://\\1:***@#g" \
+    -e "s#((bearer|basic)[[:space:]]+)[^[:space:]\"']+#\\1***#Ig" \
+    -e "s#((api[_-]?key|apikey|access[_-]?token|client[_-]?secret|secret[_-]?key|secret|token|password|passwd|pwd|authorization)[\"']?[[:space:]]*[=:][[:space:]]*[\"']?)[^&[:space:]\"']+#\\1***#Ig"
+}
+why_tail() {  # why_tail <log byte offset> <rc>  → one line, ≤ 500 bytes, valid UTF-8, no credentials
+  local off="$1" rc="$2" t
+  t=$(tail -c +"$((off + 1))" "$LOG" 2>/dev/null | grep -v '^--- \|^  FAIL: \|^  ok: ' | tail -n 3 | tr '\t\r\n' '   ')
+  printf '%s' "rc=$rc: ${t:-<no output>}" \
+    | tr '\t\r\n' '   ' | sed 's/  */ /g' | redact_secrets | cut -c1-500 | iconv -c -f UTF-8 -t UTF-8
+}
 step() {  # step "name" cmd...   (non-fatal; records failures + a run row)
   local name="$1"; shift
   local start; start=$(date -Is)
   echo "--- $name ---" | tee -a "$LOG"
-  local st
+  local st why="" off rc
+  off=$(wc -c < "$LOG" 2>/dev/null || echo 0)
   if "$@" >>"$LOG" 2>&1; then echo "  ok: $name" | tee -a "$LOG"; st=success
-  else echo "  FAIL: $name (rc=$?)" | tee -a "$LOG"; FAILURES+=("$name"); st=failed; fi
-  printf '%s\t%s\t%s\t%s\n' "$name" "$start" "$(date -Is)" "$st" >> "$RUNFILE"
+  else rc=$?; why=$(why_tail "$off" "$rc"); echo "  FAIL: $name ($why)" | tee -a "$LOG"; FAILURES+=("$name"); st=failed; fi
+  printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$start" "$(date -Is)" "$st" "$why" >> "$RUNFILE"
 }
 
 # 0. Ensure a Kite token (the 08:50 cron normally has it; re-try once if missing).
@@ -117,10 +137,11 @@ gate() {  # gate "name" cmd...
   local name="$1"; shift
   local start; start=$(date -Is)
   echo "--- $name ---" | tee -a "$LOG"
-  local st
+  local st why="" off rc
+  off=$(wc -c < "$LOG" 2>/dev/null || echo 0)
   if "$@" >>"$LOG" 2>&1; then echo "  ok: $name" | tee -a "$LOG"; st=success
-  else echo "  FAIL: $name" | tee -a "$LOG"; FAILURES+=("$name"); GATE_OK=0; st=failed; fi
-  printf '%s\t%s\t%s\t%s\n' "$name" "$start" "$(date -Is)" "$st" >> "$RUNFILE"
+  else rc=$?; why=$(why_tail "$off" "$rc"); echo "  FAIL: $name ($why)" | tee -a "$LOG"; FAILURES+=("$name"); GATE_OK=0; st=failed; fi
+  printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$start" "$(date -Is)" "$st" "$why" >> "$RUNFILE"
 }
 gate "validate_lenses_A" $PY scripts/foundation/validate_lenses.py --check A
 gate "validate_lenses_B" $PY scripts/foundation/validate_lenses.py --check B

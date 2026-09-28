@@ -7,7 +7,10 @@ REPO="/home/ubuntu/atlas-os"
 cd "$REPO"
 export PYTHONPATH="$REPO:$REPO/scripts/foundation"   # covers atlas.* and _db imports
 set -a; source .env; set +a
-"$REPO/.venv/bin/python" scripts/foundation/build_sector_rs_intraday.py
+# Non-fatal like every step below. Under `set -e` a failure here ended the tick before the
+# crossover monitor (the FM's only live alert) or the MaaL marks ever ran.
+"$REPO/.venv/bin/python" scripts/foundation/build_sector_rs_intraday.py \
+  || { rc=$?; echo "$(date -Is) build_sector_rs_intraday failed (rc=$rc) — continuing with the monitors"; }
 # Desk v2 wave 1b: stop/target breach monitor on open desk positions (non-fatal)
 "$REPO/.venv/bin/python" scripts/foundation/desk_monitor.py || true
 # Crossover v2 §C: provisional breach alerts + the 15:15 sell lock for the notify-enabled

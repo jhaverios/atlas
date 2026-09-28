@@ -15,7 +15,9 @@ tables. Nothing synthetic.
     python write_health_snapshot.py --runfile <tsv> --eod <YYYY-MM-DD>
 
 Runfile is TSV, one line per orchestrator step (compute steps AND gate steps):
-    <script_name>\t<started_iso>\t<ended_iso>\t<status>
+    <script_name>\t<started_iso>\t<ended_iso>\t<status>[\t<why>]
+
+`why` is a failed step's own last lines (atlas_daily.sh::why_tail); it becomes error_message.
 
 The gate steps (validate_lenses_A/B, freshness_guard) are ALSO written to
 atlas_validator_results (its old M2-M5-only CHECK constraint was dropped 2026-07-02), so
@@ -25,6 +27,7 @@ the /health validator panel shows the current run's gate outcomes.
 from __future__ import annotations
 
 import argparse
+import re
 import socket
 import subprocess
 import uuid
@@ -71,6 +74,29 @@ TRACKED = [
 ]
 
 
+# The reason is rendered on the PUBLIC board, and a traceback is where credentials surface
+# (requests puts whole URLs in an HTTPError, a driver can echo a DSN). atlas_daily.sh redacts
+# once; this is the second layer on the single database writer — the same patterns as
+# scripts/global_market/write_health_snapshot.py. Over-redaction is the acceptable failure.
+_SECRET_URL_PASSWORD = re.compile(r"://([^:/@\s]+):[^@\s]*@")
+_SECRET_PATTERNS = [
+    re.compile(r"((?:bearer|basic)\s+)[^\s\"']+", re.I),
+    re.compile(
+        r"((?:api[_-]?key|apikey|access[_-]?token|client[_-]?secret|secret[_-]?key|secret|token"
+        r"|password|passwd|pwd|authorization)[\"']?\s*[=:]\s*[\"']?)[^&\s\"']+",
+        re.I,
+    ),
+]
+
+
+def redact(text: str) -> str:
+    """Every credential-shaped value in ``text`` → ``***``; everything else untouched."""
+    text = _SECRET_URL_PASSWORD.sub(r"://\1:***@", text)
+    for rx in _SECRET_PATTERNS:
+        text = rx.sub(r"\1***", text)
+    return text
+
+
 def _git_sha() -> str | None:
     try:
         return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
@@ -80,12 +106,16 @@ def _git_sha() -> str | None:
 
 def _write_runs(runfile: str, host: str, sha: str | None) -> int:
     rows = []
-    with open(runfile) as fh:
+    # errors="replace": a reason cut mid-character must not take the whole snapshot down.
+    with open(runfile, encoding="utf-8", errors="replace") as fh:
         for line in fh:
             parts = line.rstrip("\n").split("\t")
             if len(parts) < 4 or not parts[0]:
                 continue
             name, started, ended, status = parts[0], parts[1], parts[2], parts[3]
+            # MaaL steps compare REAL client books; their reasons quote client returns. The
+            # board is public, so those stay in the box log and never reach the table.
+            why = parts[4] if len(parts) > 4 and not name.startswith("maal") else ""
             rows.append(
                 {
                     "run_id": str(uuid.uuid4()),
@@ -94,6 +124,7 @@ def _write_runs(runfile: str, host: str, sha: str | None) -> int:
                     "started_at": started,
                     "ended_at": ended or None,
                     "status": status,
+                    "error_message": redact(why).strip()[:500] or None,
                     "host": host,
                     "git_sha": sha,
                 }
@@ -107,10 +138,14 @@ def _write_runs(runfile: str, host: str, sha: str | None) -> int:
 
 # Gate step (runfile) → validator table. Names kept <=16 (validator col limit); status is
 # PASS/FAIL (the surviving chk_validator_results_status constraint).
+# Every gate() in atlas_daily.sh; frontend/src/lib/queries/health.ts GATE_VALIDATORS reads
+# these names.
 _GATE_VALIDATORS = {
     "validate_lenses_A": "lens_gate_A",
     "validate_lenses_B": "lens_gate_B",
+    "validate_lenses_C": "lens_gate_C",
     "freshness_guard": "freshness_guard",
+    "maal_cpp_reconcile": "maal_reconcile",
 }
 
 

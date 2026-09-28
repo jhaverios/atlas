@@ -18,7 +18,6 @@ import { FreshnessTable } from '@/components/health/FreshnessTable'
 import { JipSyncPanel } from '@/components/health/JipSyncPanel'
 import { AnomaliesPanel } from '@/components/health/AnomaliesPanel'
 import { ValidatorScorecard } from '@/components/health/ValidatorScorecard'
-import { KnownGapsPanel } from '@/components/health/KnownGapsPanel'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -55,7 +54,6 @@ export default async function HealthPage() {
       <JipSyncPanel rows={jipFreshness} />
       <AnomaliesPanel anomalies={anomalies} />
       <ValidatorScorecard runs={validators} />
-      <KnownGapsPanel />
     </div>
   )
 }
