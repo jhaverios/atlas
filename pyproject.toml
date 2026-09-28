@@ -57,6 +57,10 @@ dependencies = [
     # SP08 — KiteConnect WebSocket intraday feed
     "kiteconnect>=5.0",
 
+    # Kite headless login (scripts/kite_autologin.py) — the TOTP code. Undeclared until
+    # 2026-09-28, so a `uv sync` on the box deleted it and every price feed stopped on 09-08.
+    "pyotp>=2.9",
+
     # SP08 — Telegram daily OAuth reminder
     "python-telegram-bot>=20.0",
 
