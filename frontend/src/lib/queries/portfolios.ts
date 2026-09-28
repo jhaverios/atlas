@@ -239,7 +239,8 @@ export type AtlasRead = {
   breadth200: number | null
   weightedRs3m: number | null
   flaggedCount: number
-  sectorVsBenchmark: { sector: string; port: number; bench: number }[]
+  // bench is null when the NIFTY 500 weights are unavailable — never a stand-in 0.
+  sectorVsBenchmark: { sector: string; port: number; bench: number | null }[]
 }
 
 export type NavPointRow = { d: string; nav: number }
@@ -474,6 +475,10 @@ export async function getPortfolioDetail(id: string): Promise<PortfolioDetail | 
     GROUP BY 1
   `
   const bench = new Map(benchRows.map((r) => [String(r.sector), Number(r.w)]))
+  // de_index_constituents is a JIP-era table nothing in this repo writes, and its weight_pct
+  // is empty: every sector summed to 0, and the page showed "vs 0.0%" beside every holding —
+  // a comparison against nothing, presented as the market. No weights, no comparison.
+  const benchKnown = [...bench.values()].some((w) => Number.isFinite(w) && w > 0)
   const totVal = holdings.reduce((a, h) => a + (h.value ?? 0), 0)
   const portBySector = new Map<string, number>()
   for (const h of holdings) {
@@ -485,7 +490,7 @@ export async function getPortfolioDetail(id: string): Promise<PortfolioDetail | 
     .map((sector) => ({
       sector,
       port: totVal > 0 ? ((portBySector.get(sector) ?? 0) / totVal) * 100 : 0,
-      bench: bench.get(sector) ?? 0,
+      bench: benchKnown ? (bench.get(sector) ?? 0) : null,
     }))
     .sort((a, b) => b.port - a.port)
   const flagged = (h: Holding) =>

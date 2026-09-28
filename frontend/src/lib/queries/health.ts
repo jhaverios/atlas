@@ -333,7 +333,7 @@ export async function getLatestHealthDate(): Promise<Date | null> {
 
 export type ValidatorRun = {
   run_id: string
-  validator: 'M3' | 'M4' | 'M5'
+  validator: string
   ran_at: Date
   total_checks: number
   failures: number
@@ -382,7 +382,25 @@ export type HealthHeaderStatus = {
   last_health_check: Date | null
 }
 
+/**
+ * The nightly's publish gates, under the names scripts/ops/write_health_snapshot.py records
+ * them. These — not M3-M5 — are what the status reads. M3-M5 were retired on 2026-07-02, but
+ * their last results stayed "latest", one a FAIL from June, so the header, the nav dot and
+ * /api/health read red every day whatever the nightly did, and red stopped meaning anything.
+ */
+export const GATE_VALIDATORS = [
+  { key: 'lens_gate_A', label: 'Lens gate A' },
+  { key: 'lens_gate_B', label: 'Lens gate B' },
+  { key: 'lens_gate_C', label: 'Lens gate C' },
+  { key: 'freshness_guard', label: 'Freshness' },
+  { key: 'maal_reconcile', label: 'MaaL reconcile' },
+] as const
+
+/** The nightly runs every weekday, so a last check older than this means it has stopped. */
+export const HEALTH_CHECK_MAX_AGE_DAYS = 4
+
 export async function getHeaderStatus(): Promise<HealthHeaderStatus> {
+  const gates = GATE_VALIDATORS.map((g) => g.key)
   const [hcRows, anomRows, valRows] = await Promise.all([
     sql<{ ts: Date | null }[]>`
       SELECT MAX(computed_at) AS ts FROM atlas_foundation.atlas_health_daily
@@ -394,10 +412,12 @@ export async function getHeaderStatus(): Promise<HealthHeaderStatus> {
         AND is_anomaly = TRUE
       GROUP BY severity
     `,
-    // Latest result per validator — prevents old test runs from inflating FAIL count.
+    // Latest result per CURRENT gate — prevents old test runs and retired validators from
+    // inflating the FAIL count.
     sql<{ validator: string; status: string }[]>`
       SELECT DISTINCT ON (validator) validator, status
       FROM atlas_foundation.atlas_validator_results
+      WHERE validator = ANY(${gates})
       ORDER BY validator, ran_at DESC
     `,
   ])
@@ -406,6 +426,19 @@ export async function getHeaderStatus(): Promise<HealthHeaderStatus> {
   const sev: Record<string, number> = {}
   for (const r of anomRows) sev[r.severity] = Number(r.n)
   const validatorFailures = valRows.filter((r) => r.status === 'FAIL').length
+
+  // Every row above is written BY the nightly, so if it stops, they all freeze at its last
+  // verdict — green included. Silence has to read as red, not as the last good night.
+  const ageDays = last ? (Date.now() - new Date(last).getTime()) / 86_400_000 : Infinity
+  if (ageDays > HEALTH_CHECK_MAX_AGE_DAYS) {
+    return {
+      level: 'red',
+      message: last
+        ? `No health check for ${Math.floor(ageDays)} days — the nightly has stopped`
+        : 'No health check has ever been recorded',
+      last_health_check: last,
+    }
+  }
 
   if ((sev.critical ?? 0) > 0 || validatorFailures > 0) {
     return {

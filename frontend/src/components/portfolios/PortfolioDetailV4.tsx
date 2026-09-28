@@ -185,32 +185,45 @@ function HoldingsTable({ holdings, nav }: { holdings: Holding[]; nav: number | n
 function SectorVsBench({ atlas }: { atlas: AtlasRead }) {
   const rows = atlas.sectorVsBenchmark
   if (!rows.length) return <p className="font-sans text-[13px] italic text-txt-3">No positions yet.</p>
-  const max = Math.max(...rows.map((r) => Math.max(r.port, r.bench)), 1)
+  const max = Math.max(...rows.map((r) => Math.max(r.port, r.bench ?? 0)), 1)
+  const benchKnown = rows.some((r) => r.bench != null)
   return (
     <div className="space-y-2">
       {rows.map((r) => {
-        const diff = r.port - r.bench
+        const bench = r.bench
+        const diff = bench == null ? null : r.port - bench
         return (
           <div key={r.sector}>
             <div className="mb-0.5 flex items-baseline justify-between">
               <span className="truncate font-sans text-[11.5px] text-txt-2">{r.sector}</span>
               <span className="font-num text-[10.5px] tabular-nums text-txt-3">
-                {r.port.toFixed(1)}% vs {r.bench.toFixed(1)}%{' '}
-                <span className={diff >= 0 ? 'text-sig-pos' : 'text-sig-neg'}>
-                  ({diff >= 0 ? '+' : ''}{diff.toFixed(1)})
-                </span>
+                {r.port.toFixed(1)}%
+                {bench != null && diff != null && (
+                  <>
+                    {' '}vs {bench.toFixed(1)}%{' '}
+                    <span className={diff >= 0 ? 'text-sig-pos' : 'text-sig-neg'}>
+                      ({diff >= 0 ? '+' : ''}{diff.toFixed(1)})
+                    </span>
+                  </>
+                )}
               </span>
             </div>
             <div className="h-1.5 overflow-hidden rounded-full bg-surface-raised">
               <div className="h-full rounded-full bg-brand/70" style={{ width: `${(r.port / max) * 100}%` }} />
             </div>
-            <div className="mt-px h-1 overflow-hidden rounded-full bg-surface-raised">
-              <div className="h-full rounded-full bg-txt-3/50" style={{ width: `${(r.bench / max) * 100}%` }} />
-            </div>
+            {bench != null && (
+              <div className="mt-px h-1 overflow-hidden rounded-full bg-surface-raised">
+                <div className="h-full rounded-full bg-txt-3/50" style={{ width: `${(bench / max) * 100}%` }} />
+              </div>
+            )}
           </div>
         )
       })}
-      <p className="pt-1 font-sans text-[10.5px] text-txt-3">Thick bar = this portfolio · thin bar = NIFTY 500 sector weight.</p>
+      <p className="pt-1 font-sans text-[10.5px] text-txt-3">
+        {benchKnown
+          ? 'Thick bar = this portfolio · thin bar = NIFTY 500 sector weight.'
+          : 'This portfolio’s sector weights. NIFTY 500 sector weights are not available yet, so there is no benchmark to compare against.'}
+      </p>
     </div>
   )
 }

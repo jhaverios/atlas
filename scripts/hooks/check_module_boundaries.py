@@ -105,6 +105,10 @@ ALLOWED_SUBTREE_EDGES: set[tuple[str, str]] = {
     # reset on the pooled connection). Same long-term fix as the ALLOWED_EDGES
     # users above — promote the session manager into atlas.db.
     ("atlas.global_market", "atlas.compute._session"),
+    # lenses → compute._session: atlas.lenses.data.adapters reads and writes with
+    # open_compute_session / bulk_upsert. Pre-existing edge, documented so staged edits
+    # to the adapters (the NSE-calendar helpers) don't trip the check. Same long-term fix.
+    ("atlas.lenses", "atlas.compute._session"),
     # global_market → portfolio.engine: buy-and-hold replay with a fractional
     # quantum is the book of record for basket NAV (plan M2); one accounting
     # truth, not a second engine.

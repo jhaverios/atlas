@@ -20,7 +20,7 @@ Weights come from atlas_foundation.atlas_thresholds (the /thresholds panel) — 
 hard-coded. Idempotent: re-running a date range DELETEs then re-INSERTs those days.
 
     python build_fund_rank_history.py                 # full backfill (first snapshot -> latest lens date)
-    python build_fund_rank_history.py --latest        # just the newest lens date (nightly append)
+    python build_fund_rank_history.py --latest        # nightly: every lens date since the last ranked one
     python build_fund_rank_history.py --start 2026-06-01 --end 2026-06-29
     python build_fund_rank_history.py --rebuild        # drop + full rebuild
 """
@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 
 sys.path.insert(
@@ -188,6 +189,18 @@ def build_day(day, weights: dict) -> pd.DataFrame:
     ]
 
 
+def catchup_start(newest_lens: date, newest_ranked: date | None) -> date:
+    """First lens date the nightly ``--latest`` run ranks.
+
+    The day after the newest ranked date, so a stretch the nightly missed is filled rather
+    than left as a permanent hole (after the 2026-09 Kite outage, 9-25 Sept). When nothing
+    is behind, or nothing has been ranked yet, just the newest lens date — as before.
+    """
+    if newest_ranked is None or newest_ranked >= newest_lens:
+        return newest_lens
+    return newest_ranked + timedelta(days=1)
+
+
 def run(start: str | None, end: str | None, rebuild: bool, latest: bool) -> None:
     if rebuild:
         _db.exec_sql(f"DROP TABLE IF EXISTS {TGT} CASCADE")
@@ -197,7 +210,10 @@ def run(start: str | None, end: str | None, rebuild: bool, latest: bool) -> None
         mx = _db.scalar(
             "SELECT max(date) FROM atlas_foundation.atlas_lens_scores_daily WHERE asset_class='stock'"
         )
-        start = end = str(mx)
+        if mx is None:
+            print("no stock-lens dates yet; nothing to do")
+            return
+        start, end = str(catchup_start(mx, _db.scalar(f"SELECT max(date) FROM {TGT}"))), str(mx)
     else:
         start = start or _default_start()
         end = end or str(
@@ -235,7 +251,9 @@ def main() -> None:
     )
     ap.add_argument("--end", help="last date (YYYY-MM-DD); default = latest stock-lens date")
     ap.add_argument(
-        "--latest", action="store_true", help="only the newest lens date (nightly append)"
+        "--latest",
+        action="store_true",
+        help="every lens date since the newest ranked one (nightly)",
     )
     ap.add_argument("--rebuild", action="store_true", help="DROP + full rebuild")
     args = ap.parse_args()

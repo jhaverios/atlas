@@ -52,6 +52,7 @@ export function PipelineRunsTable({
               <th className="py-2 pr-4 text-right">Duration</th>
               <th className="py-2 pr-4 text-right">Rows</th>
               <th className="py-2 pl-4">Status</th>
+              <th className="py-2 pl-4">Why</th>
             </tr>
           </thead>
           <tbody>
@@ -81,11 +82,17 @@ export function PipelineRunsTable({
                     {r.status}
                   </span>
                 </td>
+                <td
+                  className="max-w-[28rem] py-2 pl-4 font-mono text-[11px] text-txt-3 break-words"
+                  title={r.error_message ?? undefined}
+                >
+                  {r.status === 'failed' && r.error_message ? r.error_message.slice(0, 220) : '—'}
+                </td>
               </tr>
             ))}
             {runs.length === 0 && (
               <tr>
-                <td colSpan={6} className="py-3 font-sans text-sm text-txt-3">
+                <td colSpan={7} className="py-3 font-sans text-sm text-txt-3">
                   No pipeline runs recorded yet.
                 </td>
               </tr>

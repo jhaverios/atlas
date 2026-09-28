@@ -16,6 +16,7 @@ from atlas.compute.regime import (
     DEPLOYMENT_MULTIPLIERS,
     apply_dislocation_override,
     classify_regime_state,
+    daily_window_start,
 )
 
 THRESHOLDS = {
@@ -230,3 +231,32 @@ def test_deployment_multipliers_complete() -> None:
     assert DEPLOYMENT_MULTIPLIERS["Cautious"] == 0.4
     assert DEPLOYMENT_MULTIPLIERS["Risk-Off"] == 0.0
     assert DEPLOYMENT_MULTIPLIERS["DISLOCATION_SUSPENDED"] == 0.0
+
+
+# --------------------------------------------------------------------------- #
+# Nightly window                                                              #
+# --------------------------------------------------------------------------- #
+# The dates are the 2026-09 Kite outage: regime last written Tue 8 Sept, the next
+# nightly with prices on Mon 28 Sept.
+
+
+@pytest.mark.unit
+def test_nightly_window_is_ten_days_when_the_table_is_current() -> None:
+    assert daily_window_start(date(2026, 9, 28), date(2026, 9, 25)) == date(2026, 9, 18)
+
+
+@pytest.mark.unit
+def test_nightly_window_reaches_back_to_the_day_after_the_last_row() -> None:
+    """A fixed ten-day window would have left 9-17 Sept as a permanent hole."""
+    assert daily_window_start(date(2026, 9, 28), date(2026, 9, 8)) == date(2026, 9, 9)
+
+
+@pytest.mark.unit
+def test_nightly_window_is_bounded_so_a_stale_table_is_not_a_full_backfill() -> None:
+    today = date(2026, 9, 28)
+    assert daily_window_start(today, date(2025, 1, 2)) == today - timedelta(days=120)
+
+
+@pytest.mark.unit
+def test_nightly_window_on_an_empty_table_is_the_usual_ten_days() -> None:
+    assert daily_window_start(date(2026, 9, 28), None) == date(2026, 9, 18)

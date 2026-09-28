@@ -1,7 +1,5 @@
 // frontend/src/components/health/HealthSummaryCards.tsx
-import type { ValidatorRun } from '@/lib/queries/health'
-
-const VALIDATORS = ['M3', 'M4', 'M5'] as const
+import { GATE_VALIDATORS, type ValidatorRun } from '@/lib/queries/health'
 
 function ValidatorCard({ validator, run }: { validator: string; run: ValidatorRun | undefined }) {
   if (!run) {
@@ -29,7 +27,7 @@ function ValidatorCard({ validator, run }: { validator: string; run: ValidatorRu
     >
       <div className="flex items-center justify-between mb-2">
         <span className="font-sans text-[10px] font-semibold tracking-[0.2em] text-txt-3 uppercase">
-          Validator {validator}
+          {validator}
         </span>
         <span
           className={`inline-flex items-center gap-1 font-num text-[10px] font-semibold uppercase tracking-wider ${
@@ -75,9 +73,9 @@ export function HealthSummaryCards({
       </h2>
 
       {/* Validator row */}
-      <div className="grid grid-cols-3 gap-3 mb-3">
-        {VALIDATORS.map((v) => (
-          <ValidatorCard key={v} validator={v} run={validatorMap[v]} />
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3">
+        {GATE_VALIDATORS.map((g) => (
+          <ValidatorCard key={g.key} validator={g.label} run={validatorMap[g.key]} />
         ))}
       </div>
 

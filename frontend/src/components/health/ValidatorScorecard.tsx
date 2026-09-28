@@ -1,8 +1,8 @@
 // frontend/src/components/health/ValidatorScorecard.tsx
-import type { ValidatorRun } from '@/lib/queries/health'
+import { GATE_VALIDATORS, type ValidatorRun } from '@/lib/queries/health'
 
 type Stats = {
-  validator: 'M3' | 'M4' | 'M5'
+  validator: string
   latest: ValidatorRun | null
   passRate: number  // 0..1 over the window
   history: ValidatorRun[]
@@ -10,14 +10,14 @@ type Stats = {
 
 function statsFromRuns(runs: ValidatorRun[]): Stats[] {
   const out: Stats[] = []
-  for (const v of ['M3', 'M4', 'M5'] as const) {
-    const subset = runs.filter((r) => r.validator === v)
+  for (const { key, label } of GATE_VALIDATORS) {
+    const subset = runs.filter((r) => r.validator === key)
     const sorted = [...subset].sort(
       (a, b) => new Date(b.ran_at).getTime() - new Date(a.ran_at).getTime(),
     )
     const passes = subset.filter((r) => r.status === 'PASS').length
     out.push({
-      validator: v,
+      validator: label,
       latest: sorted[0] ?? null,
       passRate: subset.length === 0 ? 0 : passes / subset.length,
       history: sorted.slice(0, 30).reverse(), // oldest → newest
@@ -63,7 +63,7 @@ export function ValidatorScorecard({ runs }: { runs: ValidatorRun[] }) {
               className="flex items-center justify-between gap-4 border-b border-edge-hair pb-2 last:border-b-0 last:pb-0"
             >
               <div className="flex items-center gap-3">
-                <span className="font-num text-sm w-6">{s.validator}</span>
+                <span className="font-sans text-sm w-32">{s.validator}</span>
                 {s.latest ? (
                   <span className="font-num text-[12px] tabular-nums">
                     {s.latest.total_checks - s.latest.failures}/{s.latest.total_checks}{' '}
