@@ -88,31 +88,45 @@ jobs:
               echo "[deploy ${STAMP}] build OK; pm2 reload (rolling, zero-downtime)" | tee -a "$LOG"
               pm2 reload atlas-frontend-v3 >> "$LOG" 2>&1
             else
-              # NOT "untouched": `next build` empties .next before it compiles, so a failed build
-              # leaves the live server reading a half-written one and every page renders "This page
-              # could not be found" (2026-09-28, twice, for 40 minutes). Put the backup back first.
+              # NOT "untouched": `next build` deletes .next (all but cache/) before it compiles
+              # (next/dist/build/index.js, cleanDistDir). The live server keeps rendering HTML from
+              # memory, but the stylesheet and build manifests it started with are gone, so every
+              # page loads unstyled (they answer 400). 2026-09-28: two failed deploys left the board
+              # like that, and the second one's "backup" was the wreck (0.1 s to copy). Restore now.
               echo "[deploy ${STAMP}] build FAILED — restoring .next.bak.${STAMP} and reloading" | tee -a "$LOG"
               if [ -d ".next.bak.${STAMP}" ]; then rm -rf .next && cp -r ".next.bak.${STAMP}" .next && pm2 reload atlas-frontend-v3 >> "$LOG" 2>&1; fi
-              # Why, in the Actions log, so nobody needs an SSH session to learn it (credentials cut).
-              grep -iE "error|EMAXCONN|ECONN|failed|killed" "$LOG" | tail -n 8 | sed -E 's#://[^/@[:space:]]+@#://***@#g' || true
+              # Which known failure it was, in the Actions log, so nobody needs SSH to learn it. Names
+              # only, never raw lines: this repo is public, and a prerender error can quote row data.
+              for PAT in EMAXCONNSESSION ENOSPC "heap out of memory" Killed "Failed to compile" "Type error" "npm error"; do
+                if grep -q "$PAT" "$LOG"; then echo "[deploy ${STAMP}] log mentions: $PAT"; fi
+              done
+              grep -o 'Error occurred prerendering page "[^"]*"' "$LOG" | sort -u | head -n 5 || true
               exit 1
             fi
 
-            echo "[deploy ${STAMP}] health-check (HTTP 200 + v4 nav marker)" | tee -a "$LOG"
+            echo "[deploy ${STAMP}] health-check (HTTP 200 + v4 nav + home heading + stylesheet 200)" | tee -a "$LOG"
             sleep 5
             BODY=$(curl -sk -w "\n%{http_code}" https://atlas.jslwealth.in/)
             HTTP_CODE=$(printf '%s' "$BODY" | tail -n1)
             # Assert the v4 surface actually shipped: the v4 nav has "Sector View"; the pre-v4 nav
             # has "India Pulse". Guards against a flag-less build serving a 200 OLD page (it would
             # otherwise pass and stick). If the marker is missing, treat it as a failed deploy.
-            # The 404 page carries the nav too, so "Sector View" alone passed a board where every
-            # page said "This page could not be found". Require the home page's own heading.
-            if [ "$HTTP_CODE" = "200" ] && printf '%s' "$BODY" | grep -q "Sector View" && printf '%s' "$BODY" | grep -q "Markets Today" && ! printf '%s' "$BODY" | grep -q "This page could not be found"; then
-              echo "[deploy ${STAMP}] OK 200 + v4 nav — keeping new build" | tee -a "$LOG"
+            # A 200 with the nav also passes a page that renders an error inside the layout, so
+            # require the home page's own <h1> too — it is also absent when the page cannot read the
+            # regime table, and a build that cannot read its data is not verified either. (Do NOT
+            # grep for "This page could not be found": every healthy App Router page carries that
+            # text in its hidden RSC payload.) And the HTML alone is not the page: on 2026-09-28 it
+            # rendered fine while its stylesheet answered 400, so require a 200 for that too.
+            CSS=$(printf '%s' "$BODY" | grep -o '/_next/static/css/[A-Za-z0-9_-]*\.css' | head -n 1)
+            CSS_CODE=none
+            if [ -n "$CSS" ]; then CSS_CODE=$(curl -sk -o /dev/null -w "%{http_code}" "https://atlas.jslwealth.in${CSS}" || true); fi
+            echo "[deploy ${STAMP}] home HTTP ${HTTP_CODE}, stylesheet ${CSS:-none} HTTP ${CSS_CODE}" | tee -a "$LOG"
+            if [ "$HTTP_CODE" = "200" ] && [ "$CSS_CODE" = "200" ] && printf '%s' "$BODY" | grep -q "Sector View" && printf '%s' "$BODY" | grep -q "Markets Today"; then
+              echo "[deploy ${STAMP}] OK 200 + v4 nav + home heading + stylesheet — keeping new build" | tee -a "$LOG"
               ls -1dt "$APP"/.next.bak.* 2>/dev/null | tail -n +6 | xargs -r rm -rf
               exit 0
             else
-              echo "[deploy ${STAMP}] FAIL — HTTP ${HTTP_CODE} or missing v4 nav — rolling back to .next.bak.${STAMP}" | tee -a "$LOG"
+              echo "[deploy ${STAMP}] FAIL — HTTP ${HTTP_CODE}, stylesheet ${CSS_CODE}, or a missing marker — rolling back to .next.bak.${STAMP}" | tee -a "$LOG"
               if [ -d "$APP/.next.bak.${STAMP}" ]; then
                 rm -rf "$APP/.next"
                 mv "$APP/.next.bak.${STAMP}" "$APP/.next"
