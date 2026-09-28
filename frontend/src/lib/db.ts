@@ -19,11 +19,16 @@ if (process.env.ATLAS_DB_URL.includes(':6543/')) {
   )
 }
 
-// max=14 sits just under Supabase session-mode pooler's hard cap (15).
-// Stock detail page fans out to 11+ concurrent queries, so we need maximum
-// pool capacity. idle_timeout aggressively recycles dead/stuck connections.
+// The session-mode pooler allows 15 clients IN ALL, shared by this server, every `next build`
+// (each build worker opens its own pool) and the Python pipelines on the same role. The server
+// used to take 14, so a build could only succeed while the board sat idle: the midday deploy of
+// #293 on 2026-09-28 died prerendering /stocks with EMAXCONNSESSION ("max clients reached in
+// session mode"). The budget is now split — server 10, build 2 — leaving room for the pipelines.
+// Next sets NEXT_PHASE before it spawns its build workers (next/dist/build, 15.3). The stock
+// page's 11-query fan-out queues for a moment on 10; idle_timeout recycles connections fast.
+const isBuild = process.env.NEXT_PHASE === 'phase-production-build'
 const sql = postgres(process.env.ATLAS_DB_URL, {
-  max: 14,
+  max: isBuild ? 2 : 10,
   idle_timeout: 10,
   max_lifetime: 60 * 5,
   connect_timeout: 10,
